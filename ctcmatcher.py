@@ -31,28 +31,44 @@ def load_csv_from_url(url):
     except Exception:
         return None
 
-def preprocess_text_to_csv(text):
+def super_clean_text_to_csv(text):
     """
-    Probeert warrige tekst om te zetten naar bruikbare CSV.
-    - Forceert nieuwe regels
-    - Normaliseert komma's
-    - Zorgt dat pandas er kolommen van kan maken
+    Zet extreem warrige tekst om naar bruikbare CSV.
+    Deze versie is veel robuuster dan eerdere varianten.
     """
-    # Forceer newline tussen records: "2 , Wasco , spoed b9911" → newline voor b9911
+
+    # 1. Forceer newline tussen records: "2 , Wasco , spoed b9911" → newline voor b9911
     text = re.sub(r"(\d)\s+([A-Za-z])", r"\1\n\2", text)
 
-    # Als er geen komma's zijn → geen CSV
-    if "," not in text:
-        return None
+    # 2. Split op newline of op dubbele spaties
+    lines = re.split(r"[\n\r]+", text)
+    cleaned_lines = []
 
+    for line in lines:
+        # verwijder dubbele spaties
+        line = re.sub(r"\s{2,}", " ", line).strip()
+
+        # forceer komma's als scheiding
+        if "," not in line:
+            # probeer te splitsen op spaties
+            parts = line.split(" ")
+            if len(parts) > 1:
+                line = ",".join(parts)
+
+        cleaned_lines.append(line)
+
+    cleaned_text = "\n".join(cleaned_lines)
+
+    # 3. Probeer als CSV
     try:
-        df = pd.read_csv(io.StringIO(text), header=None, dtype=str)
-        # Als er maar 1 kolom is → nog steeds niet bruikbaar
-        if df.shape[1] < 2:
-            return None
-        return df
+        df = pd.read_csv(io.StringIO(cleaned_text), header=None, dtype=str)
+        if df.shape[1] >= 2:
+            return df
     except:
-        return None
+        pass
+
+    return None
+
 
 artikel_cols = {"artikelnummer", "artnr", "nummer", "code", "sku"}
 naam_cols = {"omschrijving", "naam", "product", "titel"}
@@ -82,7 +98,7 @@ if bestel_file:
         bestel_df = pd.read_excel(bestel_file, dtype=str)
 
 elif bestel_text.strip():
-    parsed = preprocess_text_to_csv(bestel_text)
+    parsed = super_clean_text_to_csv(bestel_text)
     if parsed is not None:
         bestel_df = parsed
     else:
@@ -118,7 +134,7 @@ if ctc_file:
         ctc_df = pd.read_excel(ctc_file, dtype=str)
 
 elif ctc_text.strip():
-    parsed = preprocess_text_to_csv(ctc_text)
+    parsed = super_clean_text_to_csv(ctc_text)
     if parsed is not None:
         ctc_df = parsed
     else:
