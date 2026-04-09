@@ -8,21 +8,20 @@ from difflib import SequenceMatcher
 st.markdown("# CTC Materialen Matcher")
 
 # ---------------------------------------------------------
-# PDF fallback parser (werkt zonder extra libraries)
+# PDF parser zonder externe libraries
 # ---------------------------------------------------------
 
 def extract_text_from_pdf_simple(file):
     """Zeer simpele PDF tekstextractie zonder externe libraries."""
     try:
         raw = file.read().decode("latin-1", errors="ignore")
-        # PDF tekst staat vaak tussen ( ... )
         matches = re.findall(r"\((.*?)\)", raw)
         return "\n".join(matches)
     except:
         return ""
 
 # ---------------------------------------------------------
-# DOCX parser zonder libraries
+# DOCX parser zonder externe libraries
 # ---------------------------------------------------------
 
 def extract_text_from_docx_simple(file):
@@ -31,7 +30,6 @@ def extract_text_from_docx_simple(file):
     with zipfile.ZipFile(file) as z:
         if "word/document.xml" in z.namelist():
             xml = z.read("word/document.xml").decode("utf-8")
-            # verwijder XML tags
             cleaned = re.sub(r"<.*?>", "", xml)
             text = cleaned.replace("\n", " ")
     return text
@@ -46,33 +44,17 @@ def load_any_table(file, text):
     if file is not None:
         name = file.name.lower()
 
-        # PDF
         if name.endswith(".pdf"):
             raw = extract_text_from_pdf_simple(file)
-            df = pd.read_csv(
-                io.StringIO(raw),
-                dtype=str,
-                header=None,
-                sep=r"\s+",
-                engine="python"
-            )
+            df = pd.read_csv(io.StringIO(raw), dtype=str, header=None, sep=r"\s+", engine="python")
 
-        # DOCX
         elif name.endswith(".docx"):
             raw = extract_text_from_docx_simple(file)
-            df = pd.read_csv(
-                io.StringIO(raw),
-                dtype=str,
-                header=None,
-                sep=r"\s+",
-                engine="python"
-            )
+            df = pd.read_csv(io.StringIO(raw), dtype=str, header=None, sep=r"\s+", engine="python")
 
-        # CSV
         elif name.endswith(".csv"):
             df = pd.read_csv(file, dtype=str, header=None)
 
-        # Excel
         elif name.endswith(".xlsx"):
             df = pd.read_excel(file, dtype=str, header=None)
 
@@ -80,13 +62,7 @@ def load_any_table(file, text):
         try:
             df = pd.read_csv(io.StringIO(text), dtype=str, header=None)
         except:
-            df = pd.read_csv(
-                io.StringIO(text),
-                dtype=str,
-                header=None,
-                sep=r"\s+",
-                engine="python"
-            )
+            df = pd.read_csv(io.StringIO(text), dtype=str, header=None, sep=r"\s+", engine="python")
 
     if df is not None:
         df = df.fillna("")
@@ -99,8 +75,12 @@ def load_any_table(file, text):
 def row_to_text(row):
     return " ".join(str(v) for v in row if str(v).strip() != "").lower()
 
-def extract_numbers(text):
-    return [t for t in text.split() if any(c.isdigit() for c in t)]
+def extract_artikelnummer(text):
+    """Exact artikelnummer detectie: letters + cijfers."""
+    for p in text.split():
+        if re.match(r"^[a-zA-Z]+\d+$", p):
+            return p.lower()
+    return None
 
 def extract_keywords(text):
     blacklist = {
@@ -158,29 +138,38 @@ if st.button("Start matching"):
 
     for i, b_txt in enumerate(bestel_texts):
 
-        b_nums = extract_numbers(b_txt)
+        b_art = extract_artikelnummer(b_txt)
         b_words = extract_keywords(b_txt)
         b_type = detect_producttype(b_words)
         b_set = set(b_words)
 
         for j, c_txt in enumerate(ctc_texts):
 
-            c_nums = extract_numbers(c_txt)
+            c_art = extract_artikelnummer(c_txt)
             c_words = extract_keywords(c_txt)
             c_type = detect_producttype(c_words)
             c_set = set(c_words)
 
-            exact_num = len(set(b_nums) & set(c_nums)) > 0
+            # EXACT artikelnummer match
+            exact_num = (b_art is not None and b_art == c_art)
+
+            # Producttype exact gelijk
             same_type = (b_type == c_type and b_type != "")
+
+            # Minimaal 2 kernwoorden overlap
             overlap = len(b_set & c_set)
 
+            # Superstrenge match:
+            # 1. Artikelnummer exact gelijk
+            #    OF
+            # 2. Producttype exact gelijk + overlap >= 2
             if exact_num or (same_type and overlap >= 2):
                 resultaten.append({
                     "Bestel regel": i,
                     "Bestel tekst": shorten(b_txt),
                     "CTC regel": j,
                     "CTC tekst": shorten(c_txt),
-                    "Art.nr match": exact_num,
+                    "Exact art.nr": exact_num,
                     "Producttype match": same_type,
                     "Woord overlap": overlap
                 })
@@ -192,7 +181,7 @@ if st.button("Start matching"):
     result_df = pd.DataFrame(resultaten)
 
     result_df = result_df.sort_values(
-        by=["Art.nr match", "Producttype match", "Woord overlap"],
+        by=["Exact art.nr", "Producttype match", "Woord overlap"],
         ascending=False
     )
 
