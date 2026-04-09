@@ -10,28 +10,23 @@ st.markdown("# CTC Materialen Matcher")
 # ---------------------------------------------------------
 
 def load_any_table(file, text):
-    """Laadt CSV/Excel/tekst in als DataFrame, zonder afhankelijk te zijn van kolomnamen."""
     df = None
-
     if file is not None:
         if file.name.endswith(".csv"):
             df = pd.read_csv(file, dtype=str, header=None)
         else:
             df = pd.read_excel(file, dtype=str, header=None)
-
     elif text.strip():
         try:
             df = pd.read_csv(io.StringIO(text), dtype=str, header=None)
         except:
             df = pd.read_csv(io.StringIO(text), dtype=str, header=None, sep=r"\s+")
-
     if df is not None:
         df = df.fillna("")
     return df
 
 
 def row_to_text(row):
-    """Combineert alle kolomwaarden tot één string."""
     return " ".join(str(v) for v in row if str(v).strip() != "").lower()
 
 
@@ -39,18 +34,21 @@ def similarity(a, b):
     return SequenceMatcher(None, a, b).ratio()
 
 
-def word_overlap(a, b):
-    wa = set(a.split())
-    wb = set(b.split())
-    return len(wa & wb)
-
-
 def extract_numbers(text):
     return [t for t in text.split() if any(c.isdigit() for c in t)]
 
 
+def extract_keywords(text):
+    """Filtert alleen echte productwoorden, geen rommel."""
+    blacklist = {
+        "prijs", "onbekend", "technische", "unie", "wasco", "project", "leverancier",
+        "besteld", "extra", "info", "notitie", "qty", "aantal", "stuk", "stuks"
+    }
+    words = [w for w in text.split() if w not in blacklist and len(w) > 2]
+    return set(words)
+
+
 def shorten(text, length=40):
-    """Maakt tekst korter voor overzichtelijke tabellen."""
     return text[:length] + ("..." if len(text) > length else "")
 
 
@@ -102,28 +100,34 @@ if st.button("Start matching"):
     for i, b_txt in enumerate(bestel_texts):
 
         b_nums = extract_numbers(b_txt)
-        b_words = set(b_txt.split())
+        b_keywords = extract_keywords(b_txt)
 
         for j, c_txt in enumerate(ctc_texts):
 
             c_nums = extract_numbers(c_txt)
-            c_words = set(c_txt.split())
+            c_keywords = extract_keywords(c_txt)
 
-            # EXTREEM strenge criteria
+            # 1. Exact artikelnummer match
             exact_num = len(set(b_nums) & set(c_nums)) > 0
-            overlap = len(b_words & c_words)
 
-            # Alleen opnemen als het écht klopt
-            if exact_num or overlap >= 2:
-                sim = similarity(b_txt, c_txt)
+            # 2. Strenge productwoord-overlap
+            overlap = len(b_keywords & c_keywords)
 
+            # 3. Similarity alleen voor ranking
+            sim = similarity(b_txt, c_txt)
+
+            # SUPERSTRENG:
+            # Alleen tonen als:
+            # - artikelnummer matcht
+            # - OF minimaal 3 echte productwoorden overeenkomen
+            if exact_num or overlap >= 3:
                 resultaten.append({
                     "Bestel regel": i,
                     "Bestel tekst": shorten(b_txt),
                     "CTC regel": j,
                     "CTC tekst": shorten(c_txt),
                     "Art.nr match": exact_num,
-                    "Woord overlap": overlap,
+                    "Productwoord overlap": overlap,
                     "Similarity": round(sim, 3)
                 })
 
@@ -133,9 +137,9 @@ if st.button("Start matching"):
 
     result_df = pd.DataFrame(resultaten)
 
-    # Ranking: artikelnummer > woord overlap > similarity
+    # Ranking: artikelnummer > productwoorden > similarity
     result_df = result_df.sort_values(
-        by=["Art.nr match", "Woord overlap", "Similarity"],
+        by=["Art.nr match", "Productwoord overlap", "Similarity"],
         ascending=False
     )
 
