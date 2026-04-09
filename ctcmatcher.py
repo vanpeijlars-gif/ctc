@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import requests
+import re
 
 st.title("CTC Materialen Matcher")
 st.write(
@@ -30,6 +31,22 @@ def load_csv_from_url(url):
     except Exception:
         return None
 
+def try_parse_text_as_csv(text):
+    """Probeert warrige tekst om te zetten naar bruikbare CSV."""
+    if "," not in text:
+        return None
+
+    # Forceer nieuwe regels als er meerdere records op één regel staan
+    text = re.sub(r"(\d)\s+([A-Za-z])", r"\1\n\2", text)
+
+    try:
+        df = pd.read_csv(io.StringIO(text), header=None, dtype=str)
+        if df.shape[1] < 2:
+            return None
+        return df
+    except Exception:
+        return None
+
 artikel_cols = {"artikelnummer", "artnr", "nummer", "code", "sku"}
 naam_cols = {"omschrijving", "naam", "product", "titel"}
 
@@ -49,7 +66,6 @@ with col2:
 
 bestel_url = st.text_input("Of vul een URL in naar een CSV-bestand")
 
-# Bestellijst laden
 bestel_df = None
 
 if bestel_file:
@@ -59,7 +75,11 @@ if bestel_file:
         bestel_df = pd.read_excel(bestel_file, dtype=str)
 
 elif bestel_text.strip():
-    bestel_df = pd.read_csv(io.StringIO(bestel_text), dtype=str)
+    parsed = try_parse_text_as_csv(bestel_text)
+    if parsed is not None:
+        bestel_df = parsed
+    else:
+        bestel_df = pd.read_csv(io.StringIO(bestel_text), dtype=str)
 
 elif bestel_url.strip():
     bestel_df = load_csv_from_url(bestel_url)
@@ -82,7 +102,6 @@ with col4:
 
 ctc_url = st.text_input("Of vul een URL in naar een CTC CSV-bestand")
 
-# CTC-lijst laden
 ctc_df = None
 
 if ctc_file:
@@ -92,7 +111,11 @@ if ctc_file:
         ctc_df = pd.read_excel(ctc_file, dtype=str)
 
 elif ctc_text.strip():
-    ctc_df = pd.read_csv(io.StringIO(ctc_text), dtype=str)
+    parsed = try_parse_text_as_csv(ctc_text)
+    if parsed is not None:
+        ctc_df = parsed
+    else:
+        ctc_df = pd.read_csv(io.StringIO(ctc_text), dtype=str)
 
 elif ctc_url.strip():
     ctc_df = load_csv_from_url(ctc_url)
@@ -162,6 +185,12 @@ if st.button("Start matching"):
         })
 
     result_df = pd.DataFrame(resultaten)
+
+    # Matches bovenaan sorteren
+    result_df = result_df.sort_values(
+        by=["match_op_nummer", "match_op_naam"],
+        ascending=False
+    )
 
     st.success("Matching voltooid.")
     st.dataframe(result_df, use_container_width=True)
