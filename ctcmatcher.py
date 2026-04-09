@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 # ---------------------------------------------------------
 
 st.markdown("""
-# 🔍 CTC Materialen Similarity Analyzer  
+# CTC Materialen Similarity Analyzer  
 Een professionele tool voor het vergelijken van bestellijsten met CTC‑materiaaldata.  
 Alle overeenkomsten worden automatisch gedetecteerd: exact, woord‑overlap en fuzzy similarity.
 """)
@@ -65,7 +65,7 @@ def extract_numbers(text):
 # Invoer Bestellijst
 # ---------------------------------------------------------
 
-st.subheader("📥 Bestellijst invoeren")
+st.subheader("Bestellijst invoeren")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -83,7 +83,7 @@ if bestel_df is not None:
 # Invoer CTC-lijst
 # ---------------------------------------------------------
 
-st.subheader("📥 CTC-lijst invoeren")
+st.subheader("CTC-lijst invoeren")
 
 col3, col4 = st.columns(2)
 with col3:
