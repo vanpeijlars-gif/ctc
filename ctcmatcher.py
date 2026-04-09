@@ -1,52 +1,61 @@
-!pip install pdfplumber
 import streamlit as st
 import pandas as pd
 import io
-import pdfplumber
+from PyPDF2 import PdfReader
 import docx
 from difflib import SequenceMatcher
 
 st.markdown("# CTC Materialen Matcher")
 
 # ---------------------------------------------------------
-# Helper functies
+# Helper functies: bestandsinvoer
 # ---------------------------------------------------------
 
 def extract_text_from_pdf(file):
+    reader = PdfReader(file)
     text = ""
-    with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
-            text += page.extract_text() + "\n"
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text += page_text + "\n"
     return text
 
 
 def extract_text_from_docx(file):
-    doc = docx.Document(file)
-    return "\n".join([p.text for p in doc.paragraphs])
+    document = docx.Document(file)
+    return "\n".join(p.text for p in document.paragraphs)
 
 
 def load_any_table(file, text):
-    """Laadt CSV/Excel/PDF/Word/tekst in als DataFrame."""
+    """Laadt CSV/Excel/PDF/Word/tekst in als DataFrame (zonder kolomnamen)."""
     df = None
 
     if file is not None:
         name = file.name.lower()
 
-        # PDF
         if name.endswith(".pdf"):
             raw = extract_text_from_pdf(file)
-            df = pd.read_csv(io.StringIO(raw), dtype=str, header=None, sep=r"\s+", engine="python")
+            df = pd.read_csv(
+                io.StringIO(raw),
+                dtype=str,
+                header=None,
+                sep=r"\s+",
+                engine="python"
+            )
 
-        # Word
         elif name.endswith(".docx"):
             raw = extract_text_from_docx(file)
-            df = pd.read_csv(io.StringIO(raw), dtype=str, header=None, sep=r"\s+", engine="python")
+            df = pd.read_csv(
+                io.StringIO(raw),
+                dtype=str,
+                header=None,
+                sep=r"\s+",
+                engine="python"
+            )
 
-        # CSV
         elif name.endswith(".csv"):
             df = pd.read_csv(file, dtype=str, header=None)
 
-        # Excel
         elif name.endswith(".xlsx"):
             df = pd.read_excel(file, dtype=str, header=None)
 
@@ -54,12 +63,21 @@ def load_any_table(file, text):
         try:
             df = pd.read_csv(io.StringIO(text), dtype=str, header=None)
         except:
-            df = pd.read_csv(io.StringIO(text), dtype=str, header=None, sep=r"\s+")
+            df = pd.read_csv(
+                io.StringIO(text),
+                dtype=str,
+                header=None,
+                sep=r"\s+",
+                engine="python"
+            )
 
     if df is not None:
         df = df.fillna("")
     return df
 
+# ---------------------------------------------------------
+# Helper functies: tekst en matching
+# ---------------------------------------------------------
 
 def row_to_text(row):
     return " ".join(str(v) for v in row if str(v).strip() != "").lower()
@@ -70,16 +88,18 @@ def extract_numbers(text):
 
 
 def extract_keywords(text):
+    """Filtert alleen inhoudelijke productwoorden, geen ruis."""
     blacklist = {
-        "prijs","onbekend","technische","unie","wasco","project","leverancier",
-        "besteld","extra","info","notitie","qty","aantal","stuk","stuks",
-        "mm","cm","meter","volt","230v","4000k","kelvin"
+        "prijs", "onbekend", "technische", "unie", "wasco", "project", "leverancier",
+        "besteld", "extra", "info", "notitie", "qty", "aantal", "stuk", "stuks",
+        "mm", "cm", "meter", "volt", "230v", "4000k", "kelvin"
     }
     words = [w for w in text.split() if w not in blacklist and len(w) > 2]
     return words
 
 
 def detect_producttype(words):
+    """Eerste betekenisvolle woord als producttype (extreem streng)."""
     if not words:
         return ""
     return words[0]
@@ -87,7 +107,6 @@ def detect_producttype(words):
 
 def shorten(text, length=40):
     return text[:length] + ("..." if len(text) > length else "")
-
 
 # ---------------------------------------------------------
 # Invoer Bestellijst
@@ -97,7 +116,10 @@ st.subheader("Bestellijst invoeren")
 
 col1, col2 = st.columns(2)
 with col1:
-    bestel_file = st.file_uploader("Upload bestellijst (CSV/Excel/PDF/Word)", type=["csv", "xlsx", "pdf", "docx"])
+    bestel_file = st.file_uploader(
+        "Upload bestellijst (CSV/Excel/PDF/Word)",
+        type=["csv", "xlsx", "pdf", "docx"]
+    )
 with col2:
     bestel_text = st.text_area("Of plak hier de bestellijst")
 
@@ -111,7 +133,10 @@ st.subheader("CTC-lijst invoeren")
 
 col3, col4 = st.columns(2)
 with col3:
-    ctc_file = st.file_uploader("Upload CTC-lijst (CSV/Excel/PDF/Word)", type=["csv", "xlsx", "pdf", "docx"])
+    ctc_file = st.file_uploader(
+        "Upload CTC-lijst (CSV/Excel/PDF/Word)",
+        type=["csv", "xlsx", "pdf", "docx"]
+    )
 with col4:
     ctc_text = st.text_area("Of plak hier de CTC-lijst")
 
@@ -152,6 +177,10 @@ if st.button("Start matching"):
             same_type = (b_type == c_type and b_type != "")
             overlap = len(b_set & c_set)
 
+            # Superstrenge logica:
+            # - artikelnummer match
+            #   OF
+            # - producttype exact gelijk EN minimaal 2 kernwoorden overlap
             if exact_num or (same_type and overlap >= 2):
                 resultaten.append({
                     "Bestel regel": i,
@@ -178,7 +207,7 @@ if st.button("Start matching"):
     st.dataframe(result_df, use_container_width=True, height=500)
 
     st.download_button(
-        "Download match‑resultaten",
+        "Download match-resultaten",
         result_df.to_csv(index=False).encode("utf-8"),
         "ctc_matches.csv",
         "text/csv"
