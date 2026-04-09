@@ -1,11 +1,13 @@
 import streamlit as st
 import pandas as pd
 import io
+import requests
 
 st.title("CTC Materialen Matcher")
 st.write(
     "Deze toepassing vergelijkt materialen uit een bestellijst met beschikbare items "
-    "uit de CTC-marktplaats. De matching is gebaseerd op artikelnummer en naamovereenkomst."
+    "uit de CTC-marktplaats. Matching gebeurt op basis van artikelnummer en naamovereenkomst. "
+    "U kunt bestanden uploaden, tekst plakken of een URL gebruiken."
 )
 
 # ---------------------------------------------------------
@@ -19,6 +21,15 @@ def detect_column(df, possible_names):
             return col
     return None
 
+def load_csv_from_url(url):
+    """Laadt een CSV-bestand vanaf een URL."""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return pd.read_csv(io.StringIO(response.text), dtype=str)
+    except Exception:
+        return None
+
 artikel_cols = {"artikelnummer", "artnr", "nummer", "code", "sku"}
 naam_cols = {"omschrijving", "naam", "product", "titel"}
 
@@ -26,25 +37,67 @@ naam_cols = {"omschrijving", "naam", "product", "titel"}
 # Bestellijst
 # ---------------------------------------------------------
 
-st.header("1. Bestellijst uploaden")
-bestel_file = st.file_uploader("Upload een bestellijst (CSV)", type=["csv"])
+st.header("1. Bestellijst invoeren")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    bestel_file = st.file_uploader("Upload bestellijst (CSV/Excel)", type=["csv", "xlsx"])
+
+with col2:
+    bestel_text = st.text_area("Of plak hier de bestellijst (CSV-tekst)")
+
+bestel_url = st.text_input("Of vul een URL in naar een CSV-bestand")
+
+# Bestellijst laden
+bestel_df = None
 
 if bestel_file:
-    bestel_df = pd.read_csv(bestel_file, dtype=str)
-else:
-    bestel_df = None
+    if bestel_file.name.endswith(".csv"):
+        bestel_df = pd.read_csv(bestel_file, dtype=str)
+    else:
+        bestel_df = pd.read_excel(bestel_file, dtype=str)
+
+elif bestel_text.strip():
+    bestel_df = pd.read_csv(io.StringIO(bestel_text), dtype=str)
+
+elif bestel_url.strip():
+    bestel_df = load_csv_from_url(bestel_url)
+    if bestel_df is None:
+        st.error("De bestellijst kon niet worden geladen vanaf de URL.")
 
 # ---------------------------------------------------------
 # CTC-lijst
 # ---------------------------------------------------------
 
-st.header("2. CTC-lijst uploaden")
-ctc_file = st.file_uploader("Upload een CTC-lijst (CSV)", type=["csv"])
+st.header("2. CTC-marktplaats invoeren")
+
+col3, col4 = st.columns(2)
+
+with col3:
+    ctc_file = st.file_uploader("Upload CTC-lijst (CSV/Excel)", type=["csv", "xlsx"])
+
+with col4:
+    ctc_text = st.text_area("Of plak hier de CTC-lijst (CSV-tekst)")
+
+ctc_url = st.text_input("Of vul een URL in naar een CTC CSV-bestand")
+
+# CTC-lijst laden
+ctc_df = None
 
 if ctc_file:
-    ctc_df = pd.read_csv(ctc_file, dtype=str)
-else:
-    ctc_df = None
+    if ctc_file.name.endswith(".csv"):
+        ctc_df = pd.read_csv(ctc_file, dtype=str)
+    else:
+        ctc_df = pd.read_excel(ctc_file, dtype=str)
+
+elif ctc_text.strip():
+    ctc_df = pd.read_csv(io.StringIO(ctc_text), dtype=str)
+
+elif ctc_url.strip():
+    ctc_df = load_csv_from_url(ctc_url)
+    if ctc_df is None:
+        st.error("De CTC-lijst kon niet worden geladen vanaf de URL.")
 
 # ---------------------------------------------------------
 # Matching
@@ -53,7 +106,7 @@ else:
 if st.button("Start matching"):
 
     if bestel_df is None or ctc_df is None:
-        st.error("Upload zowel een bestellijst als een CTC-lijst om te starten.")
+        st.error("Upload, plak of laad zowel een bestellijst als een CTC-lijst.")
         st.stop()
 
     # Kolommen detecteren
