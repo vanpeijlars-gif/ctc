@@ -2,216 +2,177 @@ import streamlit as st
 import pandas as pd
 import io
 import requests
-import re
+from difflib import SequenceMatcher
 
-st.title("CTC Materialen Matcher")
-st.write(
-    "Deze toepassing vergelijkt materialen uit een bestellijst met beschikbare items "
-    "uit de CTC-marktplaats. Matching gebeurt op basis van artikelnummer en naamovereenkomst. "
-    "U kunt bestanden uploaden, tekst plakken of een URL gebruiken."
-)
+st.title("CTC Materialen Matcher – Hybrid Exact + Fuzzy")
 
 # ---------------------------------------------------------
-# Hulpfuncties
+# Helper functies
 # ---------------------------------------------------------
 
-def detect_column(df, possible_names):
-    """Zoekt naar een kolomnaam die overeenkomt met bekende varianten."""
-    for col in df.columns:
-        if isinstance(col, str) and col.lower().strip() in possible_names:
-            return col
-    return None
+def load_any_table(file, text, url):
+    """Laadt CSV/Excel/tekst/URL in als DataFrame, zonder afhankelijk te zijn van kolomnamen."""
+    df = None
 
-def load_csv_from_url(url):
-    """Laadt een CSV-bestand vanaf een URL."""
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return pd.read_csv(io.StringIO(response.text), dtype=str)
-    except Exception:
-        return None
+    if file is not None:
+        if file.name.endswith(".csv"):
+            df = pd.read_csv(file, dtype=str, header=None)
+        else:
+            df = pd.read_excel(file, dtype=str, header=None)
 
-def super_clean_text_to_csv(text):
-    """
-    Zet extreem warrige tekst om naar bruikbare CSV.
-    Deze versie is veel robuuster dan eerdere varianten.
-    """
+    elif text.strip():
+        try:
+            df = pd.read_csv(io.StringIO(text), dtype=str, header=None)
+        except:
+            df = pd.read_csv(io.StringIO(text), dtype=str, header=None, sep=r"\s+")
 
-    # 1. Forceer newline tussen records: "2 , Wasco , spoed b9911" → newline voor b9911
-    text = re.sub(r"(\d)\s+([A-Za-z])", r"\1\n\2", text)
+    elif url.strip():
+        try:
+            resp = requests.get(url)
+            resp.raise_for_status()
+            df = pd.read_csv(io.StringIO(resp.text), dtype=str, header=None)
+        except:
+            df = None
 
-    # 2. Split op newline of op dubbele spaties
-    lines = re.split(r"[\n\r]+", text)
-    cleaned_lines = []
-
-    for line in lines:
-        # verwijder dubbele spaties
-        line = re.sub(r"\s{2,}", " ", line).strip()
-
-        # forceer komma's als scheiding
-        if "," not in line:
-            # probeer te splitsen op spaties
-            parts = line.split(" ")
-            if len(parts) > 1:
-                line = ",".join(parts)
-
-        cleaned_lines.append(line)
-
-    cleaned_text = "\n".join(cleaned_lines)
-
-    # 3. Probeer als CSV
-    try:
-        df = pd.read_csv(io.StringIO(cleaned_text), header=None, dtype=str)
-        if df.shape[1] >= 2:
-            return df
-    except:
-        pass
-
-    return None
+    if df is not None:
+        df = df.fillna("")
+    return df
 
 
-artikel_cols = {"artikelnummer", "artnr", "nummer", "code", "sku"}
-naam_cols = {"omschrijving", "naam", "product", "titel"}
+def row_to_text(row):
+    """Combineert alle kolomwaarden tot één string."""
+    return " ".join(str(v) for v in row if str(v).strip() != "").lower()
+
+
+def similarity(a, b):
+    """Fuzzy similarity score."""
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def word_overlap(a, b):
+    """Aantal overlappende woorden."""
+    wa = set(a.split())
+    wb = set(b.split())
+    return len(wa & wb)
+
+
+def extract_numbers(text):
+    """Zoekt naar artikelnummer-achtige tokens."""
+    return [t for t in text.split() if any(c.isdigit() for c in t)]
+
 
 # ---------------------------------------------------------
-# Bestellijst
+# Invoer
 # ---------------------------------------------------------
 
 st.header("1. Bestellijst invoeren")
-
 col1, col2 = st.columns(2)
-
 with col1:
     bestel_file = st.file_uploader("Upload bestellijst (CSV/Excel)", type=["csv", "xlsx"])
-
 with col2:
-    bestel_text = st.text_area("Of plak hier de bestellijst (CSV-tekst)")
+    bestel_text = st.text_area("Of plak hier de bestellijst")
 
-bestel_url = st.text_input("Of vul een URL in naar een CSV-bestand")
+bestel_url = st.text_input("Of URL naar bestellijst CSV")
 
-bestel_df = None
+bestel_df = load_any_table(bestel_file, bestel_text, bestel_url)
 
-if bestel_file:
-    if bestel_file.name.endswith(".csv"):
-        bestel_df = pd.read_csv(bestel_file, dtype=str)
-    else:
-        bestel_df = pd.read_excel(bestel_file, dtype=str)
-
-elif bestel_text.strip():
-    parsed = super_clean_text_to_csv(bestel_text)
-    if parsed is not None:
-        bestel_df = parsed
-    else:
-        bestel_df = pd.read_csv(io.StringIO(bestel_text), dtype=str)
-
-elif bestel_url.strip():
-    bestel_df = load_csv_from_url(bestel_url)
-    if bestel_df is None:
-        st.error("De bestellijst kon niet worden geladen vanaf de URL.")
+if bestel_df is not None:
+    st.caption("Voorbeeld bestellijst:")
+    st.dataframe(bestel_df.head())
 
 # ---------------------------------------------------------
-# CTC-lijst
-# ---------------------------------------------------------
 
-st.header("2. CTC-marktplaats invoeren")
-
+st.header("2. CTC-lijst invoeren")
 col3, col4 = st.columns(2)
-
 with col3:
     ctc_file = st.file_uploader("Upload CTC-lijst (CSV/Excel)", type=["csv", "xlsx"])
-
 with col4:
-    ctc_text = st.text_area("Of plak hier de CTC-lijst (CSV-tekst)")
+    ctc_text = st.text_area("Of plak hier de CTC-lijst")
 
-ctc_url = st.text_input("Of vul een URL in naar een CTC CSV-bestand")
+ctc_url = st.text_input("Of URL naar CTC CSV")
 
-ctc_df = None
+ctc_df = load_any_table(ctc_file, ctc_text, ctc_url)
 
-if ctc_file:
-    if ctc_file.name.endswith(".csv"):
-        ctc_df = pd.read_csv(ctc_file, dtype=str)
-    else:
-        ctc_df = pd.read_excel(ctc_file, dtype=str)
-
-elif ctc_text.strip():
-    parsed = super_clean_text_to_csv(ctc_text)
-    if parsed is not None:
-        ctc_df = parsed
-    else:
-        ctc_df = pd.read_csv(io.StringIO(ctc_text), dtype=str)
-
-elif ctc_url.strip():
-    ctc_df = load_csv_from_url(ctc_url)
-    if ctc_df is None:
-        st.error("De CTC-lijst kon niet worden geladen vanaf de URL.")
+if ctc_df is not None:
+    st.caption("Voorbeeld CTC-lijst:")
+    st.dataframe(ctc_df.head())
 
 # ---------------------------------------------------------
 # Matching
 # ---------------------------------------------------------
 
+st.header("3. Matching uitvoeren")
+
+min_similarity = st.slider("Minimale fuzzy similarity", 0.0, 1.0, 0.3, 0.05)
+max_suggesties = st.slider("Max suggesties per regel", 1, 10, 3)
+
 if st.button("Start matching"):
 
     if bestel_df is None or ctc_df is None:
-        st.error("Upload, plak of laad zowel een bestellijst als een CTC-lijst.")
+        st.error("Laad beide lijsten.")
         st.stop()
 
-    # Kolommen detecteren
-    bestel_num = detect_column(bestel_df, artikel_cols)
-    bestel_name = detect_column(bestel_df, naam_cols)
-    ctc_num = detect_column(ctc_df, artikel_cols)
-    ctc_name = detect_column(ctc_df, naam_cols)
+    bestel_texts = bestel_df.apply(row_to_text, axis=1)
+    ctc_texts = ctc_df.apply(row_to_text, axis=1)
 
-    # Clean kolommen aanmaken
-    bestel_df["num_clean"] = (
-        bestel_df[bestel_num].str.lower().str.strip() if bestel_num else ""
-    )
-    bestel_df["name_clean"] = (
-        bestel_df[bestel_name].str.lower().str.strip() if bestel_name else ""
-    )
-
-    ctc_df["num_clean"] = (
-        ctc_df[ctc_num].str.lower().str.strip() if ctc_num else ""
-    )
-    ctc_df["name_clean"] = (
-        ctc_df[ctc_name].str.lower().str.strip() if ctc_name else ""
-    )
-
-    # Resultaten verzamelen
     resultaten = []
 
-    for _, row in bestel_df.iterrows():
-        nummer = row["num_clean"]
-        naam = row["name_clean"]
+    for i, b_txt in enumerate(bestel_texts):
 
-        match_op_nummer = False
-        match_op_naam = False
-        suggesties = []
+        b_nums = extract_numbers(b_txt)
+        b_words = set(b_txt.split())
 
-        # Exacte match op artikelnummer
-        if nummer and nummer in ctc_df["num_clean"].values:
-            match_op_nummer = True
-            suggesties.append("Exacte overeenkomst op artikelnummer")
+        matches = []
 
-        # Naamvergelijking (eenvoudige substring-check)
-        if naam:
-            for ctc_item in ctc_df["name_clean"].dropna():
-                if naam in ctc_item or ctc_item in naam:
-                    match_op_naam = True
-                    suggesties.append(f"Mogelijke overeenkomst op naam: '{ctc_item}'")
+        for j, c_txt in enumerate(ctc_texts):
 
-        resultaten.append({
-            "artikelnummer": row.get(bestel_num, ""),
-            "omschrijving": row.get(bestel_name, ""),
-            "match_op_nummer": match_op_nummer,
-            "match_op_naam": match_op_naam,
-            "suggesties": "; ".join(suggesties)
-        })
+            c_nums = extract_numbers(c_txt)
+            c_words = set(c_txt.split())
+
+            # 1. Exact artikelnummer match
+            exact_num = len(set(b_nums) & set(c_nums)) > 0
+
+            # 2. Woord overlap
+            overlap = len(b_words & c_words)
+
+            # 3. Fuzzy similarity
+            sim = similarity(b_txt, c_txt)
+
+            # Alleen opnemen als er enige gelijkenis is
+            if exact_num or overlap > 0 or sim >= min_similarity:
+                matches.append((j, exact_num, overlap, sim))
+
+        # Sorteren: exact nummer > woord overlap > fuzzy similarity
+        matches.sort(key=lambda x: (x[1], x[2], x[3]), reverse=True)
+
+        # Als geen matches → toch tonen
+        if not matches:
+            resultaten.append({
+                "bestel_index": i,
+                "bestel_tekst": b_txt,
+                "ctc_index": "",
+                "ctc_tekst": "",
+                "exact_nummer": False,
+                "woord_overlap": 0,
+                "similarity": 0.0
+            })
+        else:
+            for j, exact_num, overlap, sim in matches[:max_suggesties]:
+                resultaten.append({
+                    "bestel_index": i,
+                    "bestel_tekst": b_txt,
+                    "ctc_index": j,
+                    "ctc_tekst": ctc_texts.iloc[j],
+                    "exact_nummer": exact_num,
+                    "woord_overlap": overlap,
+                    "similarity": round(sim, 3)
+                })
 
     result_df = pd.DataFrame(resultaten)
 
-    # Matches bovenaan sorteren
+    # Sorteren over ALLE regels
     result_df = result_df.sort_values(
-        by=["match_op_nummer", "match_op_naam"],
+        by=["exact_nummer", "woord_overlap", "similarity"],
         ascending=False
     )
 
@@ -219,8 +180,8 @@ if st.button("Start matching"):
     st.dataframe(result_df, use_container_width=True)
 
     st.download_button(
-        "Download resultaat (CSV)",
+        "Download resultaat",
         result_df.to_csv(index=False).encode("utf-8"),
-        "ctc_match_resultaat.csv",
+        "ctc_hybrid_match.csv",
         "text/csv"
     )
