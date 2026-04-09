@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import io
+import pdfplumber
+import docx
 from difflib import SequenceMatcher
 
 st.markdown("# CTC Materialen Matcher")
@@ -9,18 +11,50 @@ st.markdown("# CTC Materialen Matcher")
 # Helper functies
 # ---------------------------------------------------------
 
+def extract_text_from_pdf(file):
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() + "\n"
+    return text
+
+
+def extract_text_from_docx(file):
+    doc = docx.Document(file)
+    return "\n".join([p.text for p in doc.paragraphs])
+
+
 def load_any_table(file, text):
+    """Laadt CSV/Excel/PDF/Word/tekst in als DataFrame."""
     df = None
+
     if file is not None:
-        if file.name.endswith(".csv"):
+        name = file.name.lower()
+
+        # PDF
+        if name.endswith(".pdf"):
+            raw = extract_text_from_pdf(file)
+            df = pd.read_csv(io.StringIO(raw), dtype=str, header=None, sep=r"\s+", engine="python")
+
+        # Word
+        elif name.endswith(".docx"):
+            raw = extract_text_from_docx(file)
+            df = pd.read_csv(io.StringIO(raw), dtype=str, header=None, sep=r"\s+", engine="python")
+
+        # CSV
+        elif name.endswith(".csv"):
             df = pd.read_csv(file, dtype=str, header=None)
-        else:
+
+        # Excel
+        elif name.endswith(".xlsx"):
             df = pd.read_excel(file, dtype=str, header=None)
+
     elif text.strip():
         try:
             df = pd.read_csv(io.StringIO(text), dtype=str, header=None)
         except:
             df = pd.read_csv(io.StringIO(text), dtype=str, header=None, sep=r"\s+")
+
     if df is not None:
         df = df.fillna("")
     return df
@@ -30,22 +64,24 @@ def row_to_text(row):
     return " ".join(str(v) for v in row if str(v).strip() != "").lower()
 
 
-def similarity(a, b):
-    return SequenceMatcher(None, a, b).ratio()
-
-
 def extract_numbers(text):
     return [t for t in text.split() if any(c.isdigit() for c in t)]
 
 
 def extract_keywords(text):
-    """Filtert alleen echte productwoorden, geen rommel."""
     blacklist = {
-        "prijs", "onbekend", "technische", "unie", "wasco", "project", "leverancier",
-        "besteld", "extra", "info", "notitie", "qty", "aantal", "stuk", "stuks"
+        "prijs","onbekend","technische","unie","wasco","project","leverancier",
+        "besteld","extra","info","notitie","qty","aantal","stuk","stuks",
+        "mm","cm","meter","volt","230v","4000k","kelvin"
     }
     words = [w for w in text.split() if w not in blacklist and len(w) > 2]
-    return set(words)
+    return words
+
+
+def detect_producttype(words):
+    if not words:
+        return ""
+    return words[0]
 
 
 def shorten(text, length=40):
@@ -60,7 +96,7 @@ st.subheader("Bestellijst invoeren")
 
 col1, col2 = st.columns(2)
 with col1:
-    bestel_file = st.file_uploader("Upload bestellijst (CSV/Excel)", type=["csv", "xlsx"])
+    bestel_file = st.file_uploader("Upload bestellijst (CSV/Excel/PDF/Word)", type=["csv", "xlsx", "pdf", "docx"])
 with col2:
     bestel_text = st.text_area("Of plak hier de bestellijst")
 
@@ -74,7 +110,7 @@ st.subheader("CTC-lijst invoeren")
 
 col3, col4 = st.columns(2)
 with col3:
-    ctc_file = st.file_uploader("Upload CTC-lijst (CSV/Excel)", type=["csv", "xlsx"])
+    ctc_file = st.file_uploader("Upload CTC-lijst (CSV/Excel/PDF/Word)", type=["csv", "xlsx", "pdf", "docx"])
 with col4:
     ctc_text = st.text_area("Of plak hier de CTC-lijst")
 
@@ -100,35 +136,30 @@ if st.button("Start matching"):
     for i, b_txt in enumerate(bestel_texts):
 
         b_nums = extract_numbers(b_txt)
-        b_keywords = extract_keywords(b_txt)
+        b_words = extract_keywords(b_txt)
+        b_type = detect_producttype(b_words)
+        b_set = set(b_words)
 
         for j, c_txt in enumerate(ctc_texts):
 
             c_nums = extract_numbers(c_txt)
-            c_keywords = extract_keywords(c_txt)
+            c_words = extract_keywords(c_txt)
+            c_type = detect_producttype(c_words)
+            c_set = set(c_words)
 
-            # 1. Exact artikelnummer match
             exact_num = len(set(b_nums) & set(c_nums)) > 0
+            same_type = (b_type == c_type and b_type != "")
+            overlap = len(b_set & c_set)
 
-            # 2. Strenge productwoord-overlap
-            overlap = len(b_keywords & c_keywords)
-
-            # 3. Similarity alleen voor ranking
-            sim = similarity(b_txt, c_txt)
-
-            # SUPERSTRENG:
-            # Alleen tonen als:
-            # - artikelnummer matcht
-            # - OF minimaal 3 echte productwoorden overeenkomen
-            if exact_num or overlap >= 3:
+            if exact_num or (same_type and overlap >= 2):
                 resultaten.append({
                     "Bestel regel": i,
                     "Bestel tekst": shorten(b_txt),
                     "CTC regel": j,
                     "CTC tekst": shorten(c_txt),
                     "Art.nr match": exact_num,
-                    "Productwoord overlap": overlap,
-                    "Similarity": round(sim, 3)
+                    "Producttype match": same_type,
+                    "Woord overlap": overlap
                 })
 
     if not resultaten:
@@ -137,9 +168,8 @@ if st.button("Start matching"):
 
     result_df = pd.DataFrame(resultaten)
 
-    # Ranking: artikelnummer > productwoorden > similarity
     result_df = result_df.sort_values(
-        by=["Art.nr match", "Productwoord overlap", "Similarity"],
+        by=["Art.nr match", "Producttype match", "Woord overlap"],
         ascending=False
     )
 
