@@ -1,40 +1,54 @@
 import streamlit as st
 import pandas as pd
 import io
-from PyPDF2 import PdfReader
-import docx
+import zipfile
+import re
 from difflib import SequenceMatcher
 
 st.markdown("# CTC Materialen Matcher")
 
 # ---------------------------------------------------------
-# Helper functies: bestandsinvoer
+# PDF fallback parser (werkt zonder extra libraries)
 # ---------------------------------------------------------
 
-def extract_text_from_pdf(file):
-    reader = PdfReader(file)
+def extract_text_from_pdf_simple(file):
+    """Zeer simpele PDF tekstextractie zonder externe libraries."""
+    try:
+        raw = file.read().decode("latin-1", errors="ignore")
+        # PDF tekst staat vaak tussen ( ... )
+        matches = re.findall(r"\((.*?)\)", raw)
+        return "\n".join(matches)
+    except:
+        return ""
+
+# ---------------------------------------------------------
+# DOCX parser zonder libraries
+# ---------------------------------------------------------
+
+def extract_text_from_docx_simple(file):
+    """Leest DOCX zonder python-docx."""
     text = ""
-    for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text += page_text + "\n"
+    with zipfile.ZipFile(file) as z:
+        if "word/document.xml" in z.namelist():
+            xml = z.read("word/document.xml").decode("utf-8")
+            # verwijder XML tags
+            cleaned = re.sub(r"<.*?>", "", xml)
+            text = cleaned.replace("\n", " ")
     return text
 
-
-def extract_text_from_docx(file):
-    document = docx.Document(file)
-    return "\n".join(p.text for p in document.paragraphs)
-
+# ---------------------------------------------------------
+# Universele loader
+# ---------------------------------------------------------
 
 def load_any_table(file, text):
-    """Laadt CSV/Excel/PDF/Word/tekst in als DataFrame (zonder kolomnamen)."""
     df = None
 
     if file is not None:
         name = file.name.lower()
 
+        # PDF
         if name.endswith(".pdf"):
-            raw = extract_text_from_pdf(file)
+            raw = extract_text_from_pdf_simple(file)
             df = pd.read_csv(
                 io.StringIO(raw),
                 dtype=str,
@@ -43,8 +57,9 @@ def load_any_table(file, text):
                 engine="python"
             )
 
+        # DOCX
         elif name.endswith(".docx"):
-            raw = extract_text_from_docx(file)
+            raw = extract_text_from_docx_simple(file)
             df = pd.read_csv(
                 io.StringIO(raw),
                 dtype=str,
@@ -53,9 +68,11 @@ def load_any_table(file, text):
                 engine="python"
             )
 
+        # CSV
         elif name.endswith(".csv"):
             df = pd.read_csv(file, dtype=str, header=None)
 
+        # Excel
         elif name.endswith(".xlsx"):
             df = pd.read_excel(file, dtype=str, header=None)
 
@@ -76,67 +93,47 @@ def load_any_table(file, text):
     return df
 
 # ---------------------------------------------------------
-# Helper functies: tekst en matching
+# Matching helpers
 # ---------------------------------------------------------
 
 def row_to_text(row):
     return " ".join(str(v) for v in row if str(v).strip() != "").lower()
 
-
 def extract_numbers(text):
     return [t for t in text.split() if any(c.isdigit() for c in t)]
 
-
 def extract_keywords(text):
-    """Filtert alleen inhoudelijke productwoorden, geen ruis."""
     blacklist = {
-        "prijs", "onbekend", "technische", "unie", "wasco", "project", "leverancier",
-        "besteld", "extra", "info", "notitie", "qty", "aantal", "stuk", "stuks",
-        "mm", "cm", "meter", "volt", "230v", "4000k", "kelvin"
+        "prijs","onbekend","technische","unie","wasco","project","leverancier",
+        "besteld","extra","info","notitie","qty","aantal","stuk","stuks",
+        "mm","cm","meter","volt","230v","4000k","kelvin"
     }
     words = [w for w in text.split() if w not in blacklist and len(w) > 2]
     return words
 
-
 def detect_producttype(words):
-    """Eerste betekenisvolle woord als producttype (extreem streng)."""
-    if not words:
-        return ""
-    return words[0]
-
+    return words[0] if words else ""
 
 def shorten(text, length=40):
     return text[:length] + ("..." if len(text) > length else "")
 
 # ---------------------------------------------------------
-# Invoer Bestellijst
+# UI invoer
 # ---------------------------------------------------------
 
 st.subheader("Bestellijst invoeren")
-
 col1, col2 = st.columns(2)
 with col1:
-    bestel_file = st.file_uploader(
-        "Upload bestellijst (CSV/Excel/PDF/Word)",
-        type=["csv", "xlsx", "pdf", "docx"]
-    )
+    bestel_file = st.file_uploader("Upload bestellijst (CSV/Excel/PDF/Word)", type=["csv","xlsx","pdf","docx"])
 with col2:
     bestel_text = st.text_area("Of plak hier de bestellijst")
 
 bestel_df = load_any_table(bestel_file, bestel_text)
 
-# ---------------------------------------------------------
-# Invoer CTC-lijst
-# ---------------------------------------------------------
-
 st.subheader("CTC-lijst invoeren")
-
 col3, col4 = st.columns(2)
 with col3:
-    ctc_file = st.file_uploader(
-        "Upload CTC-lijst (CSV/Excel/PDF/Word)",
-        type=["csv", "xlsx", "pdf", "docx"]
-    )
+    ctc_file = st.file_uploader("Upload CTC-lijst (CSV/Excel/PDF/Word)", type=["csv","xlsx","pdf","docx"])
 with col4:
     ctc_text = st.text_area("Of plak hier de CTC-lijst")
 
@@ -177,10 +174,6 @@ if st.button("Start matching"):
             same_type = (b_type == c_type and b_type != "")
             overlap = len(b_set & c_set)
 
-            # Superstrenge logica:
-            # - artikelnummer match
-            #   OF
-            # - producttype exact gelijk EN minimaal 2 kernwoorden overlap
             if exact_num or (same_type and overlap >= 2):
                 resultaten.append({
                     "Bestel regel": i,
