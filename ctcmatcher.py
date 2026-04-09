@@ -124,43 +124,53 @@ if st.button("Start matching"):
     ctc_num_col = detect_column(ctc_df, artikel_cols)
     ctc_name_col = detect_column(ctc_df, naam_cols)
 
-    # Exact match on number
+    # Start with a copy
+    matched = bestel_df.copy()
+
+    # --- MATCH OP ARTIKELNUMMER ---
     if bestel_num_col and ctc_num_col:
         bestel_df['artikelnummer_clean'] = bestel_df[bestel_num_col].str.lower().str.strip()
         ctc_df['artikelnummer_clean'] = ctc_df[ctc_num_col].str.lower().str.strip()
 
-        matched = bestel_df.merge(
+        matched = matched.merge(
             ctc_df,
             on="artikelnummer_clean",
             how="left",
             suffixes=("_bestel", "_ctc")
         )
-        matched['match_op_nummer'] = matched[ctc_num_col].notna()
+
+        matched['match_op_nummer'] = matched['artikelnummer_clean'].notna()
     else:
-        matched = bestel_df.copy()
         matched['match_op_nummer'] = False
 
-    # Exact match on name — only if both exist
-    if bestel_name_col and ctc_name_col:
+    # --- MATCH OP NAAM (ALLEEN ALS VEILIG) ---
+    naam_match_mogelijk = (
+        bestel_name_col is not None and
+        ctc_name_col is not None
+    )
+
+    if naam_match_mogelijk:
         bestel_df['naam_clean'] = bestel_df[bestel_name_col].str.lower().str.strip()
         ctc_df['naam_clean'] = ctc_df[ctc_name_col].str.lower().str.strip()
 
-        matched = matched.merge(
-            ctc_df[['naam_clean']],
-            left_on='naam_clean',
-            right_on='naam_clean',
-            how='left',
-            suffixes=("", "_naam")
-        )
-
-        matched['match_op_naam'] = matched['naam_clean'].notna()
+        # Alleen mergen als beide kolommen bestaan
+        if 'naam_clean' in matched.columns and 'naam_clean' in ctc_df.columns:
+            matched = matched.merge(
+                ctc_df[['naam_clean']],
+                on='naam_clean',
+                how='left',
+                suffixes=("", "_naam")
+            )
+            matched['match_op_naam'] = matched['naam_clean'].notna()
+        else:
+            matched['match_op_naam'] = False
     else:
         matched['match_op_naam'] = False
 
+    # --- EINDRESULTAAT ---
     matched['match_gevonden'] = matched['match_op_nummer'] | matched['match_op_naam']
 
     st.success(f"Matching voltooid – {matched['match_gevonden'].sum()} matches gevonden.")
-
     st.dataframe(matched, use_container_width=True)
 
     csv = matched.to_csv(index=False).encode("utf-8")
