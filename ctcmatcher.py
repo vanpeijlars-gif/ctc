@@ -36,20 +36,22 @@ def row_to_text(row):
 
 
 def similarity(a, b):
-    """Fuzzy similarity score."""
     return SequenceMatcher(None, a, b).ratio()
 
 
 def word_overlap(a, b):
-    """Aantal overlappende woorden."""
     wa = set(a.split())
     wb = set(b.split())
     return len(wa & wb)
 
 
 def extract_numbers(text):
-    """Zoekt naar artikelnummer-achtige tokens."""
     return [t for t in text.split() if any(c.isdigit() for c in t)]
+
+
+def shorten(text, length=40):
+    """Maakt tekst korter voor overzichtelijke tabellen."""
+    return text[:length] + ("..." if len(text) > length else "")
 
 
 # ---------------------------------------------------------
@@ -107,25 +109,22 @@ if st.button("Start matching"):
             c_nums = extract_numbers(c_txt)
             c_words = set(c_txt.split())
 
-            # Exact artikelnummer match
+            # EXTREEM strenge criteria
             exact_num = len(set(b_nums) & set(c_nums)) > 0
-
-            # Naam / producttype match (woord overlap)
             overlap = len(b_words & c_words)
 
-            # Fuzzy similarity (alleen voor ranking)
-            sim = similarity(b_txt, c_txt)
+            # Alleen opnemen als het écht klopt
+            if exact_num or overlap >= 2:
+                sim = similarity(b_txt, c_txt)
 
-            # Alleen opnemen als er ECHT een match is
-            if exact_num or overlap > 0:
                 resultaten.append({
                     "Bestel regel": i,
-                    "Bestel tekst": b_txt,
+                    "Bestel tekst": shorten(b_txt),
                     "CTC regel": j,
-                    "CTC tekst": c_txt,
-                    "Match op artikelnummer": exact_num,
-                    "Match op naam/woorden": overlap,
-                    "Similarity score": round(sim, 3)
+                    "CTC tekst": shorten(c_txt),
+                    "Art.nr match": exact_num,
+                    "Woord overlap": overlap,
+                    "Similarity": round(sim, 3)
                 })
 
     if not resultaten:
@@ -134,14 +133,14 @@ if st.button("Start matching"):
 
     result_df = pd.DataFrame(resultaten)
 
-    # Ranking: artikelnummer > naam/woorden > similarity
+    # Ranking: artikelnummer > woord overlap > similarity
     result_df = result_df.sort_values(
-        by=["Match op artikelnummer", "Match op naam/woorden", "Similarity score"],
+        by=["Art.nr match", "Woord overlap", "Similarity"],
         ascending=False
     )
 
     st.success("Matching voltooid.")
-    st.dataframe(result_df, use_container_width=True, height=600)
+    st.dataframe(result_df, use_container_width=True, height=500)
 
     st.download_button(
         "Download match‑resultaten",
