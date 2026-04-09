@@ -1,5 +1,5 @@
 # --- MATCHING ---
-if st.button("Start matchingg"):
+if st.button("Start matching"):
 
     if bestel_df is None or ctc_df is None:
         st.error("Upload of plak zowel een bestellijst als een CTC-lijst.")
