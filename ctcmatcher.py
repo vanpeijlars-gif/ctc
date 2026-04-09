@@ -86,8 +86,6 @@ ctc_df = load_any_table(ctc_file, ctc_text)
 
 st.subheader("Matching uitvoeren")
 
-min_similarity = st.slider("Minimale fuzzy similarity", 0.0, 1.0, 0.3, 0.05)
-
 if st.button("Start matching"):
 
     if bestel_df is None or ctc_df is None:
@@ -112,14 +110,14 @@ if st.button("Start matching"):
             # Exact artikelnummer match
             exact_num = len(set(b_nums) & set(c_nums)) > 0
 
-            # Woord overlap
+            # Woord overlap (producttype, technologie, etc.)
             overlap = len(b_words & c_words)
 
-            # Fuzzy similarity
+            # Fuzzy similarity (alleen als extra ondersteuning)
             sim = similarity(b_txt, c_txt)
 
             # Alleen opnemen als er ECHT een match is
-            if exact_num or overlap > 0 or sim >= min_similarity:
+            if exact_num or overlap > 0:
                 resultaten.append({
                     "Bestel regel": i,
                     "Bestel tekst": b_txt,
