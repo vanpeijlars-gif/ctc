@@ -110,10 +110,10 @@ if st.button("Start matching"):
             # Exact artikelnummer match
             exact_num = len(set(b_nums) & set(c_nums)) > 0
 
-            # Woord overlap (producttype, technologie, etc.)
+            # Naam / producttype match (woord overlap)
             overlap = len(b_words & c_words)
 
-            # Fuzzy similarity (alleen als extra ondersteuning)
+            # Fuzzy similarity (alleen voor ranking)
             sim = similarity(b_txt, c_txt)
 
             # Alleen opnemen als er ECHT een match is
@@ -123,8 +123,8 @@ if st.button("Start matching"):
                     "Bestel tekst": b_txt,
                     "CTC regel": j,
                     "CTC tekst": c_txt,
-                    "Exact nummer match": exact_num,
-                    "Woord overlap": overlap,
+                    "Match op artikelnummer": exact_num,
+                    "Match op naam/woorden": overlap,
                     "Similarity score": round(sim, 3)
                 })
 
@@ -134,9 +134,9 @@ if st.button("Start matching"):
 
     result_df = pd.DataFrame(resultaten)
 
-    # Sorteren: exact nummer > woord overlap > similarity
+    # Ranking: artikelnummer > naam/woorden > similarity
     result_df = result_df.sort_values(
-        by=["Exact nummer match", "Woord overlap", "Similarity score"],
+        by=["Match op artikelnummer", "Match op naam/woorden", "Similarity score"],
         ascending=False
     )
 
