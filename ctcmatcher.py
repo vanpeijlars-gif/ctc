@@ -1,18 +1,9 @@
 import streamlit as st
 import pandas as pd
 import io
-import requests
 from difflib import SequenceMatcher
 
-# ---------------------------------------------------------
-# UI TITEL
-# ---------------------------------------------------------
-
-st.markdown("""
-# CTC Materialen Similarity Analyzer  
-Een professionele tool voor het vergelijken van bestellijsten met CTC‑materiaaldata.  
-Alle overeenkomsten worden automatisch gedetecteerd: exact, woord‑overlap en fuzzy similarity.
-""")
+st.markdown("# CTC Materialen Matcher")
 
 # ---------------------------------------------------------
 # Helper functies
@@ -75,10 +66,6 @@ with col2:
 
 bestel_df = load_any_table(bestel_file, bestel_text)
 
-if bestel_df is not None:
-    st.caption("Voorbeeld bestellijst:")
-    st.dataframe(bestel_df.head(), use_container_width=True)
-
 # ---------------------------------------------------------
 # Invoer CTC-lijst
 # ---------------------------------------------------------
@@ -93,17 +80,19 @@ with col4:
 
 ctc_df = load_any_table(ctc_file, ctc_text)
 
-if ctc_df is not None:
-    st.caption("Voorbeeld CTC-lijst:")
-    st.dataframe(ctc_df.head(), use_container_width=True)
-
 # ---------------------------------------------------------
-# Matching direct uitvoeren (geen knop meer)
+# MATCH KNOP
 # ---------------------------------------------------------
 
-if bestel_df is not None and ctc_df is not None:
+st.subheader("Matching uitvoeren")
 
-    st.subheader("📊 Similarity Analyse Resultaten")
+min_similarity = st.slider("Minimale fuzzy similarity", 0.0, 1.0, 0.3, 0.05)
+
+if st.button("Start matching"):
+
+    if bestel_df is None or ctc_df is None:
+        st.error("Laad beide lijsten.")
+        st.stop()
 
     bestel_texts = bestel_df.apply(row_to_text, axis=1)
     ctc_texts = ctc_df.apply(row_to_text, axis=1)
@@ -129,15 +118,21 @@ if bestel_df is not None and ctc_df is not None:
             # Fuzzy similarity
             sim = similarity(b_txt, c_txt)
 
-            resultaten.append({
-                "Bestel regel": i,
-                "Bestel tekst": b_txt,
-                "CTC regel": j,
-                "CTC tekst": c_txt,
-                "Exact nummer match": exact_num,
-                "Woord overlap": overlap,
-                "Similarity score": round(sim, 3)
-            })
+            # Alleen opnemen als er ECHT een match is
+            if exact_num or overlap > 0 or sim >= min_similarity:
+                resultaten.append({
+                    "Bestel regel": i,
+                    "Bestel tekst": b_txt,
+                    "CTC regel": j,
+                    "CTC tekst": c_txt,
+                    "Exact nummer match": exact_num,
+                    "Woord overlap": overlap,
+                    "Similarity score": round(sim, 3)
+                })
+
+    if not resultaten:
+        st.warning("Geen overeenkomsten gevonden.")
+        st.stop()
 
     result_df = pd.DataFrame(resultaten)
 
@@ -147,12 +142,12 @@ if bestel_df is not None and ctc_df is not None:
         ascending=False
     )
 
-    # Mooie tabel tonen
+    st.success("Matching voltooid.")
     st.dataframe(result_df, use_container_width=True, height=600)
 
     st.download_button(
-        "Download volledige similarity‑tabel",
+        "Download match‑resultaten",
         result_df.to_csv(index=False).encode("utf-8"),
-        "ctc_similarity_analyse.csv",
+        "ctc_matches.csv",
         "text/csv"
     )
