@@ -18,7 +18,7 @@ st.write(
 def detect_column(df, possible_names):
     """Zoekt naar een kolomnaam die overeenkomt met bekende varianten."""
     for col in df.columns:
-        if col.lower().strip() in possible_names:
+        if isinstance(col, str) and col.lower().strip() in possible_names:
             return col
     return None
 
@@ -31,20 +31,27 @@ def load_csv_from_url(url):
     except Exception:
         return None
 
-def try_parse_text_as_csv(text):
-    """Probeert warrige tekst om te zetten naar bruikbare CSV."""
+def preprocess_text_to_csv(text):
+    """
+    Probeert warrige tekst om te zetten naar bruikbare CSV.
+    - Forceert nieuwe regels
+    - Normaliseert komma's
+    - Zorgt dat pandas er kolommen van kan maken
+    """
+    # Forceer newline tussen records: "2 , Wasco , spoed b9911" → newline voor b9911
+    text = re.sub(r"(\d)\s+([A-Za-z])", r"\1\n\2", text)
+
+    # Als er geen komma's zijn → geen CSV
     if "," not in text:
         return None
 
-    # Forceer nieuwe regels als er meerdere records op één regel staan
-    text = re.sub(r"(\d)\s+([A-Za-z])", r"\1\n\2", text)
-
     try:
         df = pd.read_csv(io.StringIO(text), header=None, dtype=str)
+        # Als er maar 1 kolom is → nog steeds niet bruikbaar
         if df.shape[1] < 2:
             return None
         return df
-    except Exception:
+    except:
         return None
 
 artikel_cols = {"artikelnummer", "artnr", "nummer", "code", "sku"}
@@ -75,7 +82,7 @@ if bestel_file:
         bestel_df = pd.read_excel(bestel_file, dtype=str)
 
 elif bestel_text.strip():
-    parsed = try_parse_text_as_csv(bestel_text)
+    parsed = preprocess_text_to_csv(bestel_text)
     if parsed is not None:
         bestel_df = parsed
     else:
@@ -111,7 +118,7 @@ if ctc_file:
         ctc_df = pd.read_excel(ctc_file, dtype=str)
 
 elif ctc_text.strip():
-    parsed = try_parse_text_as_csv(ctc_text)
+    parsed = preprocess_text_to_csv(ctc_text)
     if parsed is not None:
         ctc_df = parsed
     else:
