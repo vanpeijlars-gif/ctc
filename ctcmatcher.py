@@ -1,76 +1,121 @@
-# --- MATCHING ---
+import streamlit as st
+import pandas as pd
+import io
+
+st.title("CTC Materialen Matcher")
+st.write(
+    "Deze toepassing vergelijkt materialen uit een bestellijst met beschikbare items "
+    "uit de CTC-marktplaats. De matching is gebaseerd op artikelnummer en naamovereenkomst."
+)
+
+# ---------------------------------------------------------
+# Hulpfuncties
+# ---------------------------------------------------------
+
+def detect_column(df, possible_names):
+    """Zoekt naar een kolomnaam die overeenkomt met bekende varianten."""
+    for col in df.columns:
+        if col.lower().strip() in possible_names:
+            return col
+    return None
+
+artikel_cols = {"artikelnummer", "artnr", "nummer", "code", "sku"}
+naam_cols = {"omschrijving", "naam", "product", "titel"}
+
+# ---------------------------------------------------------
+# Bestellijst
+# ---------------------------------------------------------
+
+st.header("1. Bestellijst uploaden")
+bestel_file = st.file_uploader("Upload een bestellijst (CSV)", type=["csv"])
+
+if bestel_file:
+    bestel_df = pd.read_csv(bestel_file, dtype=str)
+else:
+    bestel_df = None
+
+# ---------------------------------------------------------
+# CTC-lijst
+# ---------------------------------------------------------
+
+st.header("2. CTC-lijst uploaden")
+ctc_file = st.file_uploader("Upload een CTC-lijst (CSV)", type=["csv"])
+
+if ctc_file:
+    ctc_df = pd.read_csv(ctc_file, dtype=str)
+else:
+    ctc_df = None
+
+# ---------------------------------------------------------
+# Matching
+# ---------------------------------------------------------
+
 if st.button("Start matching"):
 
     if bestel_df is None or ctc_df is None:
-        st.error("Upload of plak zowel een bestellijst als een CTC-lijst.")
+        st.error("Upload zowel een bestellijst als een CTC-lijst om te starten.")
         st.stop()
 
-    # Detect columns
-    bestel_num_col = detect_column(bestel_df, artikel_cols)
-    bestel_name_col = detect_column(bestel_df, naam_cols)
-    ctc_num_col = detect_column(ctc_df, artikel_cols)
-    ctc_name_col = detect_column(ctc_df, naam_cols)
+    # Kolommen detecteren
+    bestel_num = detect_column(bestel_df, artikel_cols)
+    bestel_name = detect_column(bestel_df, naam_cols)
+    ctc_num = detect_column(ctc_df, artikel_cols)
+    ctc_name = detect_column(ctc_df, naam_cols)
 
-    # Start with a copy
-    matched = bestel_df.copy()
+    # Clean kolommen aanmaken
+    bestel_df["num_clean"] = (
+        bestel_df[bestel_num].str.lower().str.strip() if bestel_num else ""
+    )
+    bestel_df["name_clean"] = (
+        bestel_df[bestel_name].str.lower().str.strip() if bestel_name else ""
+    )
 
-    # Voeg lege kolommen toe zodat er nooit KeyErrors komen
-    matched["match_op_nummer"] = False
-    matched["match_op_naam"] = False
-    matched["suggestie"] = ""
+    ctc_df["num_clean"] = (
+        ctc_df[ctc_num].str.lower().str.strip() if ctc_num else ""
+    )
+    ctc_df["name_clean"] = (
+        ctc_df[ctc_name].str.lower().str.strip() if ctc_name else ""
+    )
 
-    # Clean kolommen aanmaken als ze bestaan
-    if bestel_num_col:
-        matched["artikelnummer_clean"] = matched[bestel_num_col].str.lower().str.strip()
-    else:
-        matched["artikelnummer_clean"] = ""
+    # Resultaten verzamelen
+    resultaten = []
 
-    if bestel_name_col:
-        matched["naam_clean"] = matched[bestel_name_col].str.lower().str.strip()
-    else:
-        matched["naam_clean"] = ""
+    for _, row in bestel_df.iterrows():
+        nummer = row["num_clean"]
+        naam = row["name_clean"]
 
-    if ctc_num_col:
-        ctc_df["artikelnummer_clean"] = ctc_df[ctc_num_col].str.lower().str.strip()
-    else:
-        ctc_df["artikelnummer_clean"] = ""
+        match_op_nummer = False
+        match_op_naam = False
+        suggesties = []
 
-    if ctc_name_col:
-        ctc_df["naam_clean"] = ctc_df[ctc_name_col].str.lower().str.strip()
-    else:
-        ctc_df["naam_clean"] = ""
+        # Exacte match op artikelnummer
+        if nummer and nummer in ctc_df["num_clean"].values:
+            match_op_nummer = True
+            suggesties.append("Exacte overeenkomst op artikelnummer")
 
-    # --- MATCH OP ARTIKELNUMMER ---
-    if bestel_num_col and ctc_num_col:
-        for i, row in matched.iterrows():
-            num = row["artikelnummer_clean"]
-            if num in ctc_df["artikelnummer_clean"].values:
-                matched.at[i, "match_op_nummer"] = True
-                matched.at[i, "suggestie"] = "Exacte match op artikelnummer"
+        # Naamvergelijking (eenvoudige substring-check)
+        if naam:
+            for ctc_item in ctc_df["name_clean"].dropna():
+                if naam in ctc_item or ctc_item in naam:
+                    match_op_naam = True
+                    suggesties.append(f"Mogelijke overeenkomst op naam: '{ctc_item}'")
 
-    # --- MATCH OP NAAM (simpele fuzzy check) ---
-    if bestel_name_col and ctc_name_col:
-        for i, row in matched.iterrows():
-            naam = row["naam_clean"]
+        resultaten.append({
+            "artikelnummer": row.get(bestel_num, ""),
+            "omschrijving": row.get(bestel_name, ""),
+            "match_op_nummer": match_op_nummer,
+            "match_op_naam": match_op_naam,
+            "suggesties": "; ".join(suggesties)
+        })
 
-            # simpele fuzzy: check of woorden overlappen
-            for ctc_naam in ctc_df["naam_clean"].dropna():
-                if naam != "" and ctc_naam != "":
-                    if naam in ctc_naam or ctc_naam in naam:
-                        matched.at[i, "match_op_naam"] = True
-                        if matched.at[i, "suggestie"] == "":
-                            matched.at[i, "suggestie"] = f"Lijkt op CTC item: '{ctc_naam}'"
+    result_df = pd.DataFrame(resultaten)
 
-    # Eindresultaat
-    matched["match_gevonden"] = matched["match_op_nummer"] | matched["match_op_naam"]
+    st.success("Matching voltooid.")
+    st.dataframe(result_df, use_container_width=True)
 
-    st.success(f"Matching voltooid – {matched['match_gevonden'].sum()} mogelijke matches gevonden.")
-    st.dataframe(matched, use_container_width=True)
-
-    csv = matched.to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="Download resultaat (CSV)",
-        data=csv,
-        file_name="ctc_match_resultaat.csv",
-        mime="text/csv"
+        "Download resultaat (CSV)",
+        result_df.to_csv(index=False).encode("utf-8"),
+        "ctc_match_resultaat.csv",
+        "text/csv"
     )
