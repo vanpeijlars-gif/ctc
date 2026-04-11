@@ -1,72 +1,26 @@
 import streamlit as st
 import pandas as pd
 import io
-import zipfile
 import re
-from difflib import SequenceMatcher
 
-st.markdown("# CTC Materialen Matcher")
+st.markdown("# CTC Materialen Matcher (tekst-invoer)")
 
 # ---------------------------------------------------------
-# PDF parser zonder externe libraries
+# Helper: tekst → DataFrame
 # ---------------------------------------------------------
 
-def extract_text_from_pdf_simple(file):
-    """Zeer simpele PDF tekstextractie zonder externe libraries."""
+def load_text_table(text):
+    if not text.strip():
+        return None
+
     try:
-        raw = file.read().decode("latin-1", errors="ignore")
-        matches = re.findall(r"\((.*?)\)", raw)
-        return "\n".join(matches)
+        # Probeer CSV-structuur
+        df = pd.read_csv(io.StringIO(text), dtype=str, header=None)
     except:
-        return ""
+        # Val terug op whitespace-scheiding
+        df = pd.read_csv(io.StringIO(text), dtype=str, header=None, sep=r"\s+", engine="python")
 
-# ---------------------------------------------------------
-# DOCX parser zonder externe libraries
-# ---------------------------------------------------------
-
-def extract_text_from_docx_simple(file):
-    """Leest DOCX zonder python-docx."""
-    text = ""
-    with zipfile.ZipFile(file) as z:
-        if "word/document.xml" in z.namelist():
-            xml = z.read("word/document.xml").decode("utf-8")
-            cleaned = re.sub(r"<.*?>", "", xml)
-            text = cleaned.replace("\n", " ")
-    return text
-
-# ---------------------------------------------------------
-# Universele loader
-# ---------------------------------------------------------
-
-def load_any_table(file, text):
-    df = None
-
-    if file is not None:
-        name = file.name.lower()
-
-        if name.endswith(".pdf"):
-            raw = extract_text_from_pdf_simple(file)
-            df = pd.read_csv(io.StringIO(raw), dtype=str, header=None, sep=r"\s+", engine="python")
-
-        elif name.endswith(".docx"):
-            raw = extract_text_from_docx_simple(file)
-            df = pd.read_csv(io.StringIO(raw), dtype=str, header=None, sep=r"\s+", engine="python")
-
-        elif name.endswith(".csv"):
-            df = pd.read_csv(file, dtype=str, header=None)
-
-        elif name.endswith(".xlsx"):
-            df = pd.read_excel(file, dtype=str, header=None)
-
-    elif text.strip():
-        try:
-            df = pd.read_csv(io.StringIO(text), dtype=str, header=None)
-        except:
-            df = pd.read_csv(io.StringIO(text), dtype=str, header=None, sep=r"\s+", engine="python")
-
-    if df is not None:
-        df = df.fillna("")
-    return df
+    return df.fillna("")
 
 # ---------------------------------------------------------
 # Matching helpers
@@ -101,34 +55,23 @@ def shorten(text, length=40):
 # UI invoer
 # ---------------------------------------------------------
 
-st.subheader("Bestellijst invoeren")
-col1, col2 = st.columns(2)
-with col1:
-    bestel_file = st.file_uploader("Upload bestellijst (CSV/Excel/PDF/Word)", type=["csv","xlsx","pdf","docx"])
-with col2:
-    bestel_text = st.text_area("Of plak hier de bestellijst")
+st.subheader("Bestellijst (plak hier de tekst)")
+bestel_text = st.text_area("Plak bestellijst hier", height=200)
 
-bestel_df = load_any_table(bestel_file, bestel_text)
-
-st.subheader("CTC-lijst invoeren")
-col3, col4 = st.columns(2)
-with col3:
-    ctc_file = st.file_uploader("Upload CTC-lijst (CSV/Excel/PDF/Word)", type=["csv","xlsx","pdf","docx"])
-with col4:
-    ctc_text = st.text_area("Of plak hier de CTC-lijst")
-
-ctc_df = load_any_table(ctc_file, ctc_text)
+st.subheader("CTC-lijst (plak hier de tekst)")
+ctc_text = st.text_area("Plak CTC-lijst hier", height=200)
 
 # ---------------------------------------------------------
 # MATCH KNOP
 # ---------------------------------------------------------
 
-st.subheader("Matching uitvoeren")
-
 if st.button("Start matching"):
 
+    bestel_df = load_text_table(bestel_text)
+    ctc_df = load_text_table(ctc_text)
+
     if bestel_df is None or ctc_df is None:
-        st.error("Laad beide lijsten.")
+        st.error("Beide lijsten moeten tekst bevatten.")
         st.stop()
 
     bestel_texts = bestel_df.apply(row_to_text, axis=1)
@@ -160,9 +103,6 @@ if st.button("Start matching"):
             overlap = len(b_set & c_set)
 
             # Superstrenge match:
-            # 1. Artikelnummer exact gelijk
-            #    OF
-            # 2. Producttype exact gelijk + overlap >= 2
             if exact_num or (same_type and overlap >= 2):
                 resultaten.append({
                     "Bestel regel": i,
