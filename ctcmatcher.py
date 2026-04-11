@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import re
 
-st.markdown("# CTC Materialen Matcher (tekst-invoer)")
+st.markdown("# CTC Materialen Matcher")
 
 # ---------------------------------------------------------
 # Helper: tekst → DataFrame
